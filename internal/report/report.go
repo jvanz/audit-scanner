@@ -2,9 +2,11 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/wg-policy-prototypes/policy-report/pkg/api/wgpolicyk8s.io/v1alpha2"
 
 	"github.com/kubewarden/audit-scanner/internal/constants"
@@ -54,7 +56,7 @@ func NewClusterPolicyReport(name string) ClusterPolicyReport {
 	return ClusterPolicyReport{
 		ClusterPolicyReport: v1alpha2.ClusterPolicyReport{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:              PrefixNameClusterPolicyReport + name,
+				Name:              getClusterReportName(name),
 				CreationTimestamp: metav1.Now(),
 				Labels:            labels,
 			},
@@ -76,7 +78,7 @@ func NewPolicyReport(namespace *v1.Namespace) PolicyReport {
 	return PolicyReport{
 		PolicyReport: v1alpha2.PolicyReport{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:              PrefixNamePolicyReport + namespace.Name,
+				Name:              getNamespacedReportName(namespace.Name),
 				Namespace:         namespace.Name,
 				CreationTimestamp: metav1.Now(),
 				Labels:            labels,
@@ -101,6 +103,26 @@ func NewPolicyReport(namespace *v1.Namespace) PolicyReport {
 	}
 }
 
+func getClusterReportName(name string) string {
+	return PrefixNameClusterPolicyReport + name
+}
+
+func getNamespacedReportName(namespace string) string {
+	return PrefixNamePolicyReport + namespace
+}
+
+func (r *PolicyReport) CopyResult(result *v1alpha2.PolicyReportResult) {
+	switch result.Result {
+	case StatusFail:
+		r.Summary.Fail++
+	case StatusError:
+		r.Summary.Error++
+	case StatusPass:
+		r.Summary.Pass++
+	}
+	r.Results = append(r.Results, result)
+}
+
 // GetSummaryJSON gets the report.Summary formatted in JSON. Useful for logging
 func (r *PolicyReport) GetSummaryJSON() (string, error) {
 	marshaled, err := json.Marshal(r.Summary)
@@ -117,6 +139,10 @@ func (r *ClusterPolicyReport) GetSummaryJSON() (string, error) {
 		return "error marshalling summary", err
 	}
 	return string(marshaled), nil
+}
+
+func (r *PolicyReport) GetResult(policy policiesv1.Policy, resource unstructured.Unstructured) (*v1alpha2.PolicyReportResult, bool) {
+	return findResult(r.Results, policy, resource)
 }
 
 func (r *PolicyReport) AddResult( //nolint:dupl
@@ -179,7 +205,93 @@ func (r *ClusterPolicyReport) AddResult( //nolint:dupl
 	).Msg("added result to report")
 }
 
-func newPolicyReportResult( //nolint:funlen,cyclop
+func (r *ClusterPolicyReport) CopyResult(result *v1alpha2.PolicyReportResult) {
+	switch result.Result {
+	case StatusFail:
+		r.Summary.Fail++
+	case StatusError:
+		r.Summary.Error++
+	case StatusPass:
+		r.Summary.Pass++
+	}
+	r.Results = append(r.Results, result)
+}
+
+func (r *ClusterPolicyReport) GetResult(policy policiesv1.Policy, resource unstructured.Unstructured) (*v1alpha2.PolicyReportResult, bool) {
+	return findResult(r.Results, policy, resource)
+}
+
+// isSamePolicy checks if the result object is done by given policy
+func isSamePolicy(result *v1alpha2.PolicyReportResult, policy policiesv1.Policy) (bool, error) {
+	policyName, err := getPolicyName(policy)
+	if err != nil {
+		return false, err
+	}
+	policyResourceVersion, hasPolicyResourceVersion := result.Properties[PropertyPolicyResourceVersion]
+	policyUID, hasPolicyUID := result.Properties[PropertyPolicyUID]
+	return result.Policy == policyName &&
+		hasPolicyResourceVersion && policyResourceVersion == policy.GetResourceVersion() &&
+		hasPolicyUID && types.UID(policyUID) == policy.GetUID(), nil
+}
+
+func findResult(results []*v1alpha2.PolicyReportResult, policy policiesv1.Policy, resource unstructured.Unstructured) (*v1alpha2.PolicyReportResult, bool) {
+	for _, result := range results {
+		isSamePolicy, err := isSamePolicy(result, policy)
+		if err != nil {
+			log.Error().Err(err).
+				Dict("policy", zerolog.Dict().
+					Str("resultPolicy", result.Policy).
+					Str("uid", string(policy.GetUID())).
+					Str("name", policy.GetName())).
+				Msg("cannot check if policy from result is the same policy")
+			return nil, false
+		}
+		if isSamePolicy {
+			resourceObjReference := getResourceObjectReference(resource)
+			for _, objReference := range result.Subjects {
+				if resourceObjReference == *objReference {
+					return result, true
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+func getPolicyName(policy policiesv1.Policy) (string, error) {
+	switch policy.GetObjectKind().GroupVersionKind() {
+	case schema.GroupVersionKind{
+		Group:   constants.KubewardenPoliciesGroup,
+		Version: constants.KubewardenPoliciesVersion,
+		Kind:    constants.KubewardenKindClusterAdmissionPolicy,
+	}:
+		return "cap-" + policy.GetName(), nil
+	case schema.GroupVersionKind{
+		Group:   constants.KubewardenPoliciesGroup,
+		Version: constants.KubewardenPoliciesVersion,
+		Kind:    constants.KubewardenKindAdmissionPolicy,
+	}:
+		return "ap-" + policy.GetName(), nil
+	default:
+		// this should never happens
+		log.Fatal().Msg("cannot generate policy name")
+		return "", fmt.Errorf("cannot generate policy name")
+	}
+}
+
+func getResourceObjectReference(resource unstructured.Unstructured) v1.ObjectReference {
+	return v1.ObjectReference{
+		Kind:            resource.GetKind(),
+		Namespace:       resource.GetNamespace(),
+		Name:            resource.GetName(),
+		UID:             resource.GetUID(),
+		APIVersion:      resource.GetAPIVersion(),
+		ResourceVersion: resource.GetResourceVersion(),
+	}
+}
+
+//nolint:funlen
+func newPolicyReportResult(
 	policy policiesv1.Policy, resource unstructured.Unstructured,
 	auditResponse *admv1.AdmissionReview, responseErr error,
 ) *v1alpha2.PolicyReportResult {
@@ -197,23 +309,7 @@ func newPolicyReportResult( //nolint:funlen,cyclop
 		}
 	}
 
-	var name string
-	switch policy.GetObjectKind().GroupVersionKind() {
-	case schema.GroupVersionKind{
-		Group:   constants.KubewardenPoliciesGroup,
-		Version: constants.KubewardenPoliciesVersion,
-		Kind:    constants.KubewardenKindClusterAdmissionPolicy,
-	}:
-		name = "cap-" + policy.GetName()
-	case schema.GroupVersionKind{
-		Group:   constants.KubewardenPoliciesGroup,
-		Version: constants.KubewardenPoliciesVersion,
-		Kind:    constants.KubewardenKindAdmissionPolicy,
-	}:
-		name = "ap-" + policy.GetName()
-	default: // this never happens
-		log.Fatal().Msg("no policy found when creating PolicyReportResult")
-	}
+	name, _ := getPolicyName(policy)
 
 	time := metav1.Now()
 	timestamp := *time.ProtoTime()
@@ -262,17 +358,15 @@ func newPolicyReportResult( //nolint:funlen,cyclop
 	if policy.IsContextAware() {
 		properties[TypeContextAware] = ValueTypeTrue
 	}
+	// The policy resource version is used to check if the same result can used
+	// in the next scan
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+	properties[PropertyPolicyResourceVersion] = policy.GetResourceVersion()
+	properties[PropertyPolicyUID] = string(policy.GetUID())
 
 	rule := policy.GetName()
 
-	resourceObjectReference := &v1.ObjectReference{
-		Kind:            resource.GetKind(),
-		Namespace:       resource.GetNamespace(),
-		Name:            resource.GetName(),
-		UID:             resource.GetUID(),
-		APIVersion:      resource.GetAPIVersion(),
-		ResourceVersion: resource.GetResourceVersion(),
-	}
+	resourceObjectReference := getResourceObjectReference(resource)
 
 	return &v1alpha2.PolicyReportResult{
 		Source:   PolicyReportSource,
@@ -285,7 +379,7 @@ func newPolicyReportResult( //nolint:funlen,cyclop
 		Timestamp:       timestamp, // time the result was computed
 		Result:          result,    // pass, fail, error
 		Scored:          scored,
-		Subjects:        []*v1.ObjectReference{resourceObjectReference}, // reference to object evaluated
+		Subjects:        []*v1.ObjectReference{&resourceObjectReference}, // reference to object evaluated
 		SubjectSelector: &metav1.LabelSelector{},
 		Description:     description, // output message of the policy
 		Properties:      properties,
