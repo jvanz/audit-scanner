@@ -45,39 +45,43 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/audit-scanner@${{ inputs.image-digest }})
           echo "PLATFORM_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
 
-      - name: Create SBOM file
-        shell: bash
-        run: |
-          syft \
-            -o spdx-json \
-            --file audit-scanner-sbom-${{ matrix.arch }}.spdx \
-            ghcr.io/${{ github.repository_owner }}/audit-scanner@${{ env.PLATFORM_DIGEST }}
-
-      - name: Sign SBOM file
-        run: |
-          cosign sign-blob --yes \
-            --output-certificate audit-scanner-sbom-${{ matrix.arch }}.spdx.cert \
-            --output-signature audit-scanner-sbom-${{ matrix.arch }}.spdx.sig \
-            audit-scanner-sbom-${{ matrix.arch }}.spdx
-
-      - name: Attach SBOM file in the container image
-        shell: bash
-        run: |
-          cosign attach \
-            sbom --sbom audit-scanner-sbom-${{ matrix.arch }}.spdx \
-            ghcr.io/${{ github.repository_owner }}/audit-scanner@${{ env.PLATFORM_DIGEST }}
-
-      - name: Sign SBOM file pushed to OCI registry
-        shell: bash
+      - name: Find attestation digest
         run: |
           set -e
-          SBOM_TAG="$(echo ${{ env.PLATFORM_DIGEST }} | sed -e 's/:/-/g').sbom"
+          DIGEST=$(crane manifest ghcr.io/${{github.repository_owner}}/audit-scanner@${{ inputs.image-digest }} \
+            | jq '.manifests[] | select(.annotations["vnd.docker.reference.type"]=="attestation-manifest") | select(.annotations["vnd.docker.reference.digest"]=="${{ env.PLATFORM_DIGEST }}") | .digest'
+          )
+          echo "ATTESTATION_MANIFEST_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
 
+      - name: Sign attestation manifest
+        run: |
           cosign sign --yes \
-            ghcr.io/${{github.repository_owner}}/audit-scanner:${SBOM_TAG}
+            --output-certificate audit-scanner-attestation-${{ matrix.arch }}.cert \
+            --output-signature audit-scanner-attestation-${{ matrix.arch }}.sig \
+          ghcr.io/${{github.repository_owner}}/audit-scanner@${{ env.ATTESTATION_MANIFEST_DIGEST}}
+
+      - name: Find provenance file digest
+        run: |
+          set -e
+          DIGEST=$(crane manifest ghcr.io/${{github.repository_owner}}/audit-scanner@${{ env.ATTESTATION_MANIFEST_DIGEST}} | \
+            jq '.layers[] | select(.annotations["in-toto.io/predicate-type"] == "https://slsa.dev/provenance/v0.2") | .digest')
+          echo "PROVENANCE_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
+
+      - name: Find sbom file digest
+        run: |
+          set -e
+          DIGEST=$(crane manifest ghcr.io/${{github.repository_owner}}/audit-scanner@${{ env.ATTESTATION_MANIFEST_DIGEST}} |  \
+            jq '.layers[] | select(.annotations["in-toto.io/predicate-type"] == "https://spdx.dev/Document") | .digest')
+          echo "SBOM_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
+
+      - name: Download attestation and SBOM files
+        run: |
+          set -e
+          crane blob ghcr.io/${{github.repository_owner}}/audit-scanner@${{ env.PROVENANCE_DIGEST}} > audit-scanner-attestation-${{ matrix.arch }}-provenance.json
+          crane blob ghcr.io/${{github.repository_owner}}/audit-scanner@${{ env.SBOM_DIGEST}} > audit-scanner-attestation-${{ matrix.arch }}-sbom.json
 
       - name: Upload SBOMs as artifacts
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: sbom-${{ matrix.arch }}
-          path: audit-scanner-sbom-${{ matrix.arch }}*
+          name: attestation-${{ matrix.arch }}
+          path: audit-scanner-attestation-${{ matrix.arch }}*

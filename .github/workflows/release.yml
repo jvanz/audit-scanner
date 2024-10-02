@@ -95,7 +95,7 @@ jobs:
       - name: Download SBOM artifacts
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          pattern: sbom-*
+          pattern: attestation-*
           path: ./
           merge-multiple: true
 
@@ -118,12 +118,14 @@ jobs:
             let path = require('path');
 
             let files = [
-              'audit-scanner-sbom-amd64.spdx',
-              'audit-scanner-sbom-amd64.spdx.cert',
-              'audit-scanner-sbom-amd64.spdx.sig',
-              'audit-scanner-sbom-arm64.spdx',
-              'audit-scanner-sbom-arm64.spdx.cert',
-              'audit-scanner-sbom-arm64.spdx.sig',
+              'audit-scanner-attestation-amd64-provenance.json',
+              'audit-scanner-attestation-amd64-sbom.json',
+              'audit-scanner-attestation-amd64.cert',
+              'audit-scanner-attestation-amd64.sig',
+              'audit-scanner-attestation-arm64-provenance.json',
+              'audit-scanner-attestation-arm64-sbom.json',
+              'audit-scanner-attestation-arm64.cert',
+              'audit-scanner-attestation-arm64.sig',
               "CRDS.tar.gz"]
             const {RELEASE_ID} = process.env
 
