@@ -1,12 +1,18 @@
 package report
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	wgpolicy "sigs.k8s.io/wg-policy-prototypes/policy-report/pkg/api/wgpolicyk8s.io/v1alpha2"
 )
 
@@ -17,7 +23,7 @@ const DEFAULT_HEALTH_CHECK_STATUS = "Deviating"
 
 // SuseObsStore is a store for PolicyReport and ClusterPolicyReport.
 type SuseObsStore struct {
-	client           http.Client
+	client           *http.Client
 	apiKey           string
 	internalHostname string
 	urn              string
@@ -62,7 +68,7 @@ type SuseObsJsonPayload struct {
 // NewSuseObsStore creates a new SuseObsStore.
 func NewSuseObsStore(apiKey, internalHostname, urn, cluster string) *SuseObsStore {
 	return &SuseObsStore{
-		client:           http.Client{},
+		client:           &http.Client{},
 		apiKey:           apiKey,
 		internalHostname: internalHostname,
 		urn:              urn,
@@ -88,10 +94,32 @@ func (s *SuseObsStore) generateCheckStates(policyReport *wgpolicy.PolicyReport) 
 	return checkStates
 }
 
-func (s *SuseObsStore) convertPolicyReportIntoSuseObsJsonPayload(policyReport *wgpolicy.PolicyReport) SuseObsJsonPayload {
-	payload := SuseObsJsonPayload{
+func (s *SuseObsStore) generateCheckStatesFromClusterPolicyReport(policyReport *wgpolicy.ClusterPolicyReport) []SuseObsCheckState {
+	checkStates := []SuseObsCheckState{}
+	for _, result := range policyReport.Results {
+		if result.Result != "fail" {
+			continue
+		}
+		checkState := SuseObsCheckState{
+			CheckStateId:              uuid.NewString(), // FIXME: the NewString function can panic
+			Message:                   result.Description,
+			Health:                    DEFAULT_HEALTH_CHECK_STATUS,
+			TopologyElementIdentifier: strings.ToLower("url:kubernetes:/" + s.cluster + ":" + policyReport.Scope.Kind + "/" + policyReport.Scope.Name),
+			Name:                      result.Policy,
+		}
+		checkStates = append(checkStates, checkState)
+	}
+	return checkStates
+}
+
+func (s *SuseObsStore) generateSuseObsJsonPayload(checkStates []SuseObsCheckState) (*SuseObsJsonPayload, error) {
+	url, err := url.Parse(s.internalHostname)
+	if err != nil {
+		return nil, errors.New("failed to parse SUSE OBS URL")
+	}
+	payload := &SuseObsJsonPayload{
 		ApiKey:              s.apiKey,
-		InternalHostname:    s.internalHostname,
+		InternalHostname:    url.Hostname(),
 		CollectionTimestamp: time.Now().Unix(),
 		Events:              []interface{}{},
 		Metrics:             []interface{}{},
@@ -106,26 +134,65 @@ func (s *SuseObsStore) convertPolicyReportIntoSuseObsJsonPayload(policyReport *w
 			Stream: SuseObsStream{
 				Urn: s.urn,
 			},
-			CheckStates: s.generateCheckStates(policyReport),
+			CheckStates: checkStates,
 		}},
 	}
-	return payload
+	return payload, nil
+}
+
+func (s *SuseObsStore) convertPolicyReportIntoSuseObsJsonPayload(policyReport *wgpolicy.PolicyReport) (*SuseObsJsonPayload, error) {
+	return s.generateSuseObsJsonPayload(s.generateCheckStates(policyReport))
+}
+
+func (s *SuseObsStore) convertClusterPolicyReportIntoSuseObsJsonPayload(policyReport *wgpolicy.ClusterPolicyReport) (*SuseObsJsonPayload, error) {
+	return s.generateSuseObsJsonPayload(s.generateCheckStatesFromClusterPolicyReport(policyReport))
 }
 
 // CreateOrPatchPolicyReport creates or patches a PolicyReport.
 func (s *SuseObsStore) CreateOrPatchPolicyReport(ctx context.Context, policyReport *wgpolicy.PolicyReport) error {
-	return nil
+	payload, err := s.convertPolicyReportIntoSuseObsJsonPayload(policyReport)
+	if err != nil {
+		return err
+	}
+	return s.sendRequest(payload)
 }
 
 func (s *SuseObsStore) DeleteOldPolicyReports(ctx context.Context, scanRunID, namespace string) error {
+	// No need to delete SUSE Obs will remove the check states after the expiry interval
 	return nil
 }
 
 // CreateOrPatchClusterPolicyReport creates or patches a ClusterPolicyReport.
 func (s *SuseObsStore) CreateOrPatchClusterPolicyReport(ctx context.Context, clusterPolicyReport *wgpolicy.ClusterPolicyReport) error {
-	return nil
+	payload, err := s.convertClusterPolicyReportIntoSuseObsJsonPayload(clusterPolicyReport)
+	if err != nil {
+		return err
+	}
+	return s.sendRequest(payload)
 }
 
 func (s *SuseObsStore) DeleteOldClusterPolicyReports(ctx context.Context, scanRunID string) error {
+	// No need to delete SUSE Obs will remove the check states after the expiry interval
 	return nil
+}
+
+func (s *SuseObsStore) sendRequest(payload *SuseObsJsonPayload) error {
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return errors.New("failed to marshal SUSE OBS payload")
+	}
+	url := s.internalHostname + "/receiver/stsAgent/intake?api_key="
+	log.Debug().Dict("dict", zerolog.Dict()).
+		Str("SUSE Obs URL", url).
+		Msg("Sending SUSE OBS healch check request")
+
+	response, err := s.client.Post(url+s.apiKey, "application/json", bytes.NewReader(jsonPayload))
+	if err != nil {
+		return errors.New("failed to send SUSE OBS payload")
+	}
+	if response.StatusCode != http.StatusOK {
+		return errors.New("SUSE Obs returned an error")
+	}
+	return nil
+
 }
