@@ -75,7 +75,7 @@ func TestSuseObsPayloadCreationFromPolicyReport(t *testing.T) {
 	expectedPayload := SuseObsJsonPayload{
 		ApiKey:           "apiKey",
 		InternalHostname: "suseobs.localhost",
-		Events:           []interface{}{},
+		Events:           nil,
 		Metrics:          []interface{}{},
 		ServiceChecks:    []interface{}{},
 		Topologies:       []interface{}{},
@@ -167,7 +167,7 @@ func TestSuseObsPayloadCreationFromClusterPolicyReport(t *testing.T) {
 	expectedPayload := SuseObsJsonPayload{
 		ApiKey:           "apiKey",
 		InternalHostname: "suseobs.localhost",
-		Events:           []interface{}{},
+		Events:           nil,
 		Metrics:          []interface{}{},
 		ServiceChecks:    []interface{}{},
 		Topologies:       []interface{}{},

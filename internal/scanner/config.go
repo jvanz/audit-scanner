@@ -22,11 +22,13 @@ type TLSConfig struct {
 type Config struct {
 	PoliciesClient    *policies.Client
 	K8sClient         *k8s.Client
-	PolicyReportStore *report.PolicyReportStore
+	PolicyReportStore report.ReportStore
 
 	TLS             TLSConfig
 	Parallelization ParallelizationConfig
 
-	OutputScan   bool
-	DisableStore bool
+	OutputScan    bool
+	DisableStore  bool
+	SUSEObsURL    string
+	SUSEObsApiKey string
 }

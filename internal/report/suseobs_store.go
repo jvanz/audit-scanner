@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -58,7 +59,7 @@ type SuseObsJsonPayload struct {
 	ApiKey              string               `json:"apiKey"`
 	CollectionTimestamp int64                `json:"collection_timestamp"`
 	InternalHostname    string               `json:"internalHostname"`
-	Events              []interface{}        `json:"events"`
+	Events              interface{}          `json:"events,omitempty"`
 	Metrics             []interface{}        `json:"metrics"`
 	ServiceChecks       []interface{}        `json:"service_checks"`
 	Health              []SuseObsHealthCheck `json:"health"`
@@ -68,7 +69,11 @@ type SuseObsJsonPayload struct {
 // NewSuseObsStore creates a new SuseObsStore.
 func NewSuseObsStore(apiKey, internalHostname, urn, cluster string) *SuseObsStore {
 	return &SuseObsStore{
-		client:           &http.Client{},
+		client: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
 		apiKey:           apiKey,
 		internalHostname: internalHostname,
 		urn:              urn,
@@ -121,7 +126,7 @@ func (s *SuseObsStore) generateSuseObsJsonPayload(checkStates []SuseObsCheckStat
 		ApiKey:              s.apiKey,
 		InternalHostname:    url.Hostname(),
 		CollectionTimestamp: time.Now().Unix(),
-		Events:              []interface{}{},
+		Events:              nil,
 		Metrics:             []interface{}{},
 		ServiceChecks:       []interface{}{},
 		Topologies:          []interface{}{},
@@ -184,14 +189,15 @@ func (s *SuseObsStore) sendRequest(payload *SuseObsJsonPayload) error {
 	url := s.internalHostname + "/receiver/stsAgent/intake?api_key="
 	log.Debug().Dict("dict", zerolog.Dict()).
 		Str("SUSE Obs URL", url).
+		RawJSON("payload", jsonPayload).
 		Msg("Sending SUSE OBS healch check request")
 
 	response, err := s.client.Post(url+s.apiKey, "application/json", bytes.NewReader(jsonPayload))
 	if err != nil {
-		return errors.New("failed to send SUSE OBS payload")
+		return errors.Join(errors.New("failed to send SUSE OBS payload"), err)
 	}
 	if response.StatusCode != http.StatusOK {
-		return errors.New("SUSE Obs returned an error")
+		return errors.New("SUSE Obs returned an error. Status code: " + response.Status)
 	}
 	return nil
 

@@ -30,11 +30,15 @@ const (
 //nolint:gocognit,funlen // This function is the CLI entrypoint and it's expected to be long.
 func NewRootCommand() *cobra.Command {
 	var (
-		level        logconfig.Level // log level.
-		outputScan   bool            // print result of scan as JSON to stdout.
-		skippedNs    []string        // list of namespaces to be skipped from scan.
-		insecureSSL  bool            // skip SSL cert validation when connecting to PolicyServers endpoints.
-		disableStore bool            // disable storing the results in the k8s cluster.
+		level          logconfig.Level // log level.
+		outputScan     bool            // print result of scan as JSON to stdout.
+		skippedNs      []string        // list of namespaces to be skipped from scan.
+		insecureSSL    bool            // skip SSL cert validation when connecting to PolicyServers endpoints.
+		disableStore   bool            // disable storing the results in the k8s cluster.
+		suseObsURL     string          // URL to the SUSE OBS API.
+		suseObsApiKey  string          // API key to authenticate with the SUSE OBS API.
+		suseObsUrn     string          // API key to authenticate with the SUSE OBS API.
+		suseObsCluster string          // API key to authenticate with the SUSE OBS API.
 	)
 
 	// rootCmd represents the base command when called without any subcommands.
@@ -112,7 +116,14 @@ There will be a ClusterPolicyReport with results for cluster-wide resources.`,
 			if err != nil {
 				return err
 			}
-			policyReportStore := report.NewPolicyReportStore(client)
+			var policyReportStore report.ReportStore
+			if len(suseObsURL) > 0 && len(suseObsApiKey) > 0 && len(suseObsUrn) > 0 && len(suseObsCluster) > 0 {
+				log.Debug().Msg("Using SUSE Observability as report store")
+				policyReportStore = report.NewSuseObsStore(suseObsApiKey, suseObsURL, suseObsUrn, suseObsCluster)
+			} else {
+				log.Debug().Msg("Using Kubernetes as report store")
+				policyReportStore = report.NewPolicyReportStore(client)
+			}
 
 			scannerConfig := scanner.Config{
 				PoliciesClient:    policiesClient,
@@ -162,6 +173,10 @@ There will be a ClusterPolicyReport with results for cluster-wide resources.`,
 	rootCmd.Flags().IntP("parallel-resources", "", defaultParallelResources, "number of resources to scan in parallel")
 	rootCmd.Flags().IntP("parallel-policies", "", defaultParallelPolicies, "number of policies to evaluate for a given resource in parallel")
 	rootCmd.Flags().IntP("page-size", "", defaultPageSize, "number of resources to fetch from the Kubernetes API server when paginating")
+	rootCmd.Flags().StringVar(&suseObsURL, "suseobs-url", "", "URL to the SUSE OBS API")
+	rootCmd.Flags().StringVar(&suseObsApiKey, "suseobs-apikey", "", "API key to authenticate with the SUSE OBS API")
+	rootCmd.Flags().StringVar(&suseObsUrn, "suseobs-urn", "", "SUSE Observability health check stream urn")
+	rootCmd.Flags().StringVar(&suseObsCluster, "suseobs-cluster", "", "SUSE Observability cluster name where audit scanner is running")
 
 	return rootCmd
 }
