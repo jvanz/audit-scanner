@@ -35,7 +35,7 @@ const httpClientTimeout = 10 * time.Second
 type Scanner struct {
 	policiesClient    *policies.Client
 	k8sClient         *k8s.Client
-	policyReportStore *report.PolicyReportStore
+	policyReportStore report.ReportStore
 	// http client used to make requests against the Policy Server
 	httpClient               http.Client
 	outputScan               bool
