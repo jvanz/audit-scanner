@@ -17,6 +17,9 @@ import (
 	wgpolicy "sigs.k8s.io/wg-policy-prototypes/policy-report/pkg/api/wgpolicyk8s.io/v1alpha2"
 )
 
+const DEFAULT_REPEAT_INTERVAL_DURATION = "1800s"
+const DEFAULT_EXPIRE_INTERVAL_DURATION = "1800s"
+
 // A mock used to validate the request sent to SUSE Observability
 type MockRoundTripper struct {
 	mock.Mock
@@ -28,7 +31,12 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func TestSuseObsPayloadCreationFromPolicyReport(t *testing.T) {
-	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster")
+
+	repeatInterval, err := time.ParseDuration(DEFAULT_REPEAT_INTERVAL_DURATION)
+	require.NoError(t, err)
+	expireInterval, err := time.ParseDuration(DEFAULT_EXPIRE_INTERVAL_DURATION)
+	require.NoError(t, err)
+	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster", repeatInterval, expireInterval)
 	policyReport := &wgpolicy.PolicyReport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            uuid.NewString(),
@@ -60,7 +68,7 @@ func TestSuseObsPayloadCreationFromPolicyReport(t *testing.T) {
 			{
 				Result:      statusPass,
 				Description: "",
-				Policy:      "",
+				Policy:      "ok-policy",
 			},
 			{
 				Result:      statusFail,
@@ -82,26 +90,33 @@ func TestSuseObsPayloadCreationFromPolicyReport(t *testing.T) {
 		Health: []SuseObsHealthCheck{{
 			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
 			Expire: SuseObsExpireConfiguration{
-				RepeatInterval: DEFAULT_REPEAT_INTERVAL,
-				ExpireInterval: DEFAULT_EXPIRE_INTERVAL,
+				RepeatInterval: "1800",
+				ExpireInterval: "1800",
 			},
 			Stream: SuseObsStream{
 				Urn: "urn:health:kubernetes:external-health",
 			},
 			CheckStates: []SuseObsCheckState{
 				{
-					CheckStateId:              "",
+					CheckStateId:              "pod-privileged-pod-namespace-pod-privileged-pod-pod-privileged",
 					Message:                   "priviledged pod not allowed",
-					Health:                    DEFAULT_HEALTH_CHECK_STATUS,
-					TopologyElementIdentifier: "url:kubernetes:/cluster:pod/privileged-pod",
+					Health:                    "Deviating",
+					TopologyElementIdentifier: "urn:kubernetes:/cluster:pod-namespace:pod/privileged-pod",
 					Name:                      "pod-privileged",
+				},
+				{
+					CheckStateId:              "ok-policy-pod-namespace-pod-privileged-pod-ok-policy",
+					Message:                   "",
+					Health:                    "Clear",
+					TopologyElementIdentifier: "urn:kubernetes:/cluster:pod-namespace:pod/privileged-pod",
+					Name:                      "ok-policy",
 				},
 
 				{
-					CheckStateId:              "",
+					CheckStateId:              "user-group-policy-pod-namespace-pod-privileged-pod-user-group-policy",
 					Message:                   "Invalid user",
-					Health:                    DEFAULT_HEALTH_CHECK_STATUS,
-					TopologyElementIdentifier: "url:kubernetes:/cluster:pod/privileged-pod",
+					Health:                    "Deviating",
+					TopologyElementIdentifier: "urn:kubernetes:/cluster:pod-namespace:pod/privileged-pod",
 					Name:                      "user-group-policy",
 				},
 			},
@@ -109,18 +124,17 @@ func TestSuseObsPayloadCreationFromPolicyReport(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, time.Now().Unix(), payload.CollectionTimestamp)
 	expectedPayload.CollectionTimestamp = payload.CollectionTimestamp
-	require.Equal(t, len(expectedPayload.Health[0].CheckStates), len(payload.Health[0].CheckStates))
-	for i, result := range payload.Health[0].CheckStates {
-		require.NotEmpty(t, result.CheckStateId)
-		expectedPayload.Health[0].CheckStates[i].CheckStateId = result.CheckStateId
-	}
 	require.Equal(t, expectedPayload, *payload)
 	_, err = json.Marshal(payload)
 	require.NoError(t, err)
 }
 
 func TestSuseObsPayloadCreationFromClusterPolicyReport(t *testing.T) {
-	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster")
+	repeatInterval, err := time.ParseDuration(DEFAULT_REPEAT_INTERVAL_DURATION)
+	require.NoError(t, err)
+	expireInterval, err := time.ParseDuration(DEFAULT_EXPIRE_INTERVAL_DURATION)
+	require.NoError(t, err)
+	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster", repeatInterval, expireInterval)
 	policyReport := &wgpolicy.ClusterPolicyReport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            uuid.NewString(),
@@ -152,7 +166,7 @@ func TestSuseObsPayloadCreationFromClusterPolicyReport(t *testing.T) {
 			{
 				Result:      statusPass,
 				Description: "",
-				Policy:      "",
+				Policy:      "ok-policy",
 			},
 			{
 				Result:      statusFail,
@@ -174,26 +188,32 @@ func TestSuseObsPayloadCreationFromClusterPolicyReport(t *testing.T) {
 		Health: []SuseObsHealthCheck{{
 			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
 			Expire: SuseObsExpireConfiguration{
-				RepeatInterval: DEFAULT_REPEAT_INTERVAL,
-				ExpireInterval: DEFAULT_EXPIRE_INTERVAL,
+				RepeatInterval: "1800",
+				ExpireInterval: "1800",
 			},
 			Stream: SuseObsStream{
 				Urn: "urn:health:kubernetes:external-health",
 			},
 			CheckStates: []SuseObsCheckState{
 				{
-					CheckStateId:              "",
+					CheckStateId:              "pod-privileged-pod-namespace-pod-privileged-pod-pod-privileged",
 					Message:                   "priviledged pod not allowed",
-					Health:                    DEFAULT_HEALTH_CHECK_STATUS,
-					TopologyElementIdentifier: "url:kubernetes:/cluster:pod/privileged-pod",
+					Health:                    "Deviating",
+					TopologyElementIdentifier: "urn:kubernetes:/cluster:pod/privileged-pod",
 					Name:                      "pod-privileged",
 				},
-
 				{
-					CheckStateId:              "",
+					CheckStateId:              "ok-policy-pod-namespace-pod-privileged-pod-ok-policy",
+					Message:                   "",
+					Health:                    "Clear",
+					TopologyElementIdentifier: "urn:kubernetes:/cluster:pod/privileged-pod",
+					Name:                      "ok-policy",
+				},
+				{
+					CheckStateId:              "user-group-policy-pod-namespace-pod-privileged-pod-user-group-policy",
 					Message:                   "Invalid user",
-					Health:                    DEFAULT_HEALTH_CHECK_STATUS,
-					TopologyElementIdentifier: "url:kubernetes:/cluster:pod/privileged-pod",
+					Health:                    "Deviating",
+					TopologyElementIdentifier: "urn:kubernetes:/cluster:pod/privileged-pod",
 					Name:                      "user-group-policy",
 				},
 			},
@@ -201,11 +221,6 @@ func TestSuseObsPayloadCreationFromClusterPolicyReport(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, time.Now().Unix(), payload.CollectionTimestamp)
 	expectedPayload.CollectionTimestamp = payload.CollectionTimestamp
-	require.Equal(t, len(expectedPayload.Health[0].CheckStates), len(payload.Health[0].CheckStates))
-	for i, result := range payload.Health[0].CheckStates {
-		require.NotEmpty(t, result.CheckStateId)
-		expectedPayload.Health[0].CheckStates[i].CheckStateId = result.CheckStateId
-	}
 	require.Equal(t, expectedPayload, *payload)
 	bytes, err := json.Marshal(payload)
 	require.NoError(t, err)
@@ -253,7 +268,11 @@ func TestSuseObsCheckHealthCheckCreationFromPolicyReport(t *testing.T) {
 			},
 		},
 	}
-	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster")
+	repeatInterval, err := time.ParseDuration(DEFAULT_REPEAT_INTERVAL_DURATION)
+	require.NoError(t, err)
+	expireInterval, err := time.ParseDuration(DEFAULT_EXPIRE_INTERVAL_DURATION)
+	require.NoError(t, err)
+	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster", repeatInterval, expireInterval)
 
 	mockedRoundTripper := &MockRoundTripper{}
 	suseObsStore.client = &http.Client{
@@ -272,7 +291,7 @@ func TestSuseObsCheckHealthCheckCreationFromPolicyReport(t *testing.T) {
 		StatusCode: http.StatusOK,
 	}, nil)
 
-	err := suseObsStore.CreateOrPatchPolicyReport(t.Context(), policyReport)
+	err = suseObsStore.CreateOrPatchPolicyReport(t.Context(), policyReport)
 	require.NoError(t, err)
 
 	mockedRoundTripper.AssertExpectations(t)

@@ -8,19 +8,20 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	// "github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	corev1 "k8s.io/api/core/v1"
 	wgpolicy "sigs.k8s.io/wg-policy-prototypes/policy-report/pkg/api/wgpolicyk8s.io/v1alpha2"
 )
 
 const DEFAULT_CONSISTENCY_MODEL = "REPEAT_STATES"
-const DEFAULT_REPEAT_INTERVAL = "50"
-const DEFAULT_EXPIRE_INTERVAL = "300"
-const DEFAULT_HEALTH_CHECK_STATUS = "Deviating"
+
+// const DEFAULT_HEALTH_CHECK_STATUS = "Deviating"
 
 // SuseObsStore is a store for PolicyReport and ClusterPolicyReport.
 type SuseObsStore struct {
@@ -29,6 +30,8 @@ type SuseObsStore struct {
 	internalHostname string
 	urn              string
 	cluster          string
+	repeatInterval   string
+	expireInterval   string
 }
 
 type SuseObsExpireConfiguration struct {
@@ -67,10 +70,13 @@ type SuseObsJsonPayload struct {
 }
 
 // NewSuseObsStore creates a new SuseObsStore.
-func NewSuseObsStore(apiKey, internalHostname, urn, cluster string) *SuseObsStore {
+func NewSuseObsStore(apiKey, internalHostname, urn, cluster string, repeatInterval, expireInterval time.Duration) *SuseObsStore {
+	repeatIntervalStr := strconv.FormatFloat(repeatInterval.Seconds(), 'f', 0, 32)
+	expireIntervalStr := strconv.FormatFloat(expireInterval.Seconds(), 'f', 0, 32)
 	return &SuseObsStore{
 		client: &http.Client{
 			Transport: &http.Transport{
+				// FIXME - configure certicates for a secure communication
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			},
 		},
@@ -78,20 +84,23 @@ func NewSuseObsStore(apiKey, internalHostname, urn, cluster string) *SuseObsStor
 		internalHostname: internalHostname,
 		urn:              urn,
 		cluster:          cluster,
+		repeatInterval:   repeatIntervalStr,
+		expireInterval:   expireIntervalStr,
 	}
 }
 
 func (s *SuseObsStore) generateCheckStates(policyReport *wgpolicy.PolicyReport) []SuseObsCheckState {
 	checkStates := []SuseObsCheckState{}
 	for _, result := range policyReport.Results {
-		if result.Result != "fail" {
-			continue
+		healthCheckStatus := "Clear"
+		if result.Result == "fail" {
+			healthCheckStatus = "Deviating"
 		}
 		checkState := SuseObsCheckState{
-			CheckStateId:              uuid.NewString(), // FIXME: the NewString function can panic
+			CheckStateId:              generateCheckStateId(result.Policy, policyReport.Scope),
 			Message:                   result.Description,
-			Health:                    DEFAULT_HEALTH_CHECK_STATUS,
-			TopologyElementIdentifier: strings.ToLower("url:kubernetes:/" + s.cluster + ":" + policyReport.Scope.Kind + "/" + policyReport.Scope.Name),
+			Health:                    healthCheckStatus,
+			TopologyElementIdentifier: strings.ToLower("urn:kubernetes:/" + s.cluster + ":" + policyReport.Scope.Namespace + ":" + policyReport.Scope.Kind + "/" + policyReport.Scope.Name),
 			Name:                      result.Policy,
 		}
 		checkStates = append(checkStates, checkState)
@@ -99,17 +108,22 @@ func (s *SuseObsStore) generateCheckStates(policyReport *wgpolicy.PolicyReport) 
 	return checkStates
 }
 
+func generateCheckStateId(policy string, scope *corev1.ObjectReference) string {
+	return strings.ToLower(policy + "-" + scope.Namespace + "-" + scope.Kind + "-" + scope.Name + "-" + policy)
+}
+
 func (s *SuseObsStore) generateCheckStatesFromClusterPolicyReport(policyReport *wgpolicy.ClusterPolicyReport) []SuseObsCheckState {
 	checkStates := []SuseObsCheckState{}
 	for _, result := range policyReport.Results {
-		if result.Result != "fail" {
-			continue
+		healthCheckStatus := "Clear"
+		if result.Result == "fail" {
+			healthCheckStatus = "Deviating"
 		}
 		checkState := SuseObsCheckState{
-			CheckStateId:              uuid.NewString(), // FIXME: the NewString function can panic
+			CheckStateId:              generateCheckStateId(result.Policy, policyReport.Scope),
 			Message:                   result.Description,
-			Health:                    DEFAULT_HEALTH_CHECK_STATUS,
-			TopologyElementIdentifier: strings.ToLower("url:kubernetes:/" + s.cluster + ":" + policyReport.Scope.Kind + "/" + policyReport.Scope.Name),
+			Health:                    healthCheckStatus,
+			TopologyElementIdentifier: strings.ToLower("urn:kubernetes:/" + s.cluster + ":" + policyReport.Scope.Kind + "/" + policyReport.Scope.Name),
 			Name:                      result.Policy,
 		}
 		checkStates = append(checkStates, checkState)
@@ -133,8 +147,8 @@ func (s *SuseObsStore) generateSuseObsJsonPayload(checkStates []SuseObsCheckStat
 		Health: []SuseObsHealthCheck{{
 			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
 			Expire: SuseObsExpireConfiguration{
-				RepeatInterval: DEFAULT_REPEAT_INTERVAL,
-				ExpireInterval: DEFAULT_EXPIRE_INTERVAL,
+				RepeatInterval: s.repeatInterval,
+				ExpireInterval: s.expireInterval,
 			},
 			Stream: SuseObsStream{
 				Urn: s.urn,
@@ -182,6 +196,9 @@ func (s *SuseObsStore) DeleteOldClusterPolicyReports(ctx context.Context, scanRu
 }
 
 func (s *SuseObsStore) sendRequest(payload *SuseObsJsonPayload) error {
+	if len(payload.Health) > 0 && len(payload.Health[0].CheckStates) == 0 {
+		return nil
+	}
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return errors.New("failed to marshal SUSE OBS payload")

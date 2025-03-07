@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kubewarden/audit-scanner/internal/k8s"
@@ -30,16 +31,23 @@ const (
 //nolint:gocognit,funlen // This function is the CLI entrypoint and it's expected to be long.
 func NewRootCommand() *cobra.Command {
 	var (
-		level          logconfig.Level // log level.
-		outputScan     bool            // print result of scan as JSON to stdout.
-		skippedNs      []string        // list of namespaces to be skipped from scan.
-		insecureSSL    bool            // skip SSL cert validation when connecting to PolicyServers endpoints.
-		disableStore   bool            // disable storing the results in the k8s cluster.
-		suseObsURL     string          // URL to the SUSE OBS API.
-		suseObsApiKey  string          // API key to authenticate with the SUSE OBS API.
-		suseObsUrn     string          // API key to authenticate with the SUSE OBS API.
-		suseObsCluster string          // API key to authenticate with the SUSE OBS API.
+		level                 logconfig.Level // log level.
+		outputScan            bool            // print result of scan as JSON to stdout.
+		skippedNs             []string        // list of namespaces to be skipped from scan.
+		insecureSSL           bool            // skip SSL cert validation when connecting to PolicyServers endpoints.
+		disableStore          bool            // disable storing the results in the k8s cluster.
+		suseObsURL            string          // URL to the SUSE OBS API.
+		suseObsApiKey         string          // API key to authenticate with the SUSE OBS API.
+		suseObsUrn            string          // API key to authenticate with the SUSE OBS API.
+		suseObsCluster        string          // API key to authenticate with the SUSE OBS API.
+		suseObsRepeatInterval time.Duration
+		suseObsExpireInterval time.Duration
 	)
+
+	defaultInterval, err := time.ParseDuration("30m")
+	if err != nil {
+		log.Logger.Err(err).Msg("cannot parse default suseob interval value ")
+	}
 
 	// rootCmd represents the base command when called without any subcommands.
 	rootCmd := &cobra.Command{
@@ -119,7 +127,7 @@ There will be a ClusterPolicyReport with results for cluster-wide resources.`,
 			var policyReportStore report.ReportStore
 			if len(suseObsURL) > 0 && len(suseObsApiKey) > 0 && len(suseObsUrn) > 0 && len(suseObsCluster) > 0 {
 				log.Debug().Msg("Using SUSE Observability as report store")
-				policyReportStore = report.NewSuseObsStore(suseObsApiKey, suseObsURL, suseObsUrn, suseObsCluster)
+				policyReportStore = report.NewSuseObsStore(suseObsApiKey, suseObsURL, suseObsUrn, suseObsCluster, suseObsRepeatInterval, suseObsExpireInterval)
 			} else {
 				log.Debug().Msg("Using Kubernetes as report store")
 				policyReportStore = report.NewPolicyReportStore(client)
@@ -177,6 +185,8 @@ There will be a ClusterPolicyReport with results for cluster-wide resources.`,
 	rootCmd.Flags().StringVar(&suseObsApiKey, "suseobs-apikey", "", "API key to authenticate with the SUSE OBS API")
 	rootCmd.Flags().StringVar(&suseObsUrn, "suseobs-urn", "", "SUSE Observability health check stream urn")
 	rootCmd.Flags().StringVar(&suseObsCluster, "suseobs-cluster", "", "SUSE Observability cluster name where audit scanner is running")
+	rootCmd.Flags().DurationVar(&suseObsRepeatInterval, "suseobs-repeat-interval", defaultInterval, "The frequency with which audit scanner will send health data to SUSE Observability. Max allowed value is 1800 (30 minutes)")
+	rootCmd.Flags().DurationVar(&suseObsExpireInterval, "suseobs-expire-interval", defaultInterval, "The time to wait after the last update before an audit scanner check is deleted by SUSE Observability if the check isn't observed again")
 
 	return rootCmd
 }
