@@ -19,9 +19,8 @@ import (
 	wgpolicy "sigs.k8s.io/wg-policy-prototypes/policy-report/pkg/api/wgpolicyk8s.io/v1alpha2"
 )
 
+// https://docs.stackstate.com/health/health-synchronization#consistency-models
 const DEFAULT_CONSISTENCY_MODEL = "REPEAT_STATES"
-
-// const DEFAULT_HEALTH_CHECK_STATUS = "Deviating"
 
 // SuseObsStore is a store for PolicyReport and ClusterPolicyReport.
 type SuseObsStore struct {
