@@ -65,7 +65,7 @@ type SuseObsJsonPayload struct {
 	Metrics             []interface{}        `json:"metrics"`
 	ServiceChecks       []interface{}        `json:"service_checks"`
 	Health              []SuseObsHealthCheck `json:"health"`
-	Topologies          []interface{}        `json:"topoligies"`
+	Topologies          []interface{}        `json:"topologies"`
 }
 
 // NewSuseObsStore creates a new SuseObsStore.
