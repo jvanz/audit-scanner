@@ -9,29 +9,13 @@ class KubewardenProvision extends ProvisioningScript {
     super(context)
   }
 
-  def INTEGRATION_TYPE = "kubewarden"
-  def INTEGRATION_URL = "kubewarden://kubewarden-1"
-
   @Override
-  ProvisioningIO<scala.Unit> install(Map<String, Object> config) {
-    def templateArguments = [
-      'topicName': topicName(),
-      'integrationType': INTEGRATION_TYPE,
-      'integrationUrl': INTEGRATION_URL
-    ]
-    templateArguments.putAll(config)
-
-    return context().stackPack().importSnapshot("templates/kubewarden.stj", templateArguments)
+  ProvisioningIO<scala.Unit> preInstall(Map<String, Object> config) {
+    return context().stackPack().importSnapshot("templates/kubewarden.stj")
   }
 
   @Override
   ProvisioningIO<scala.Unit> upgrade(Map<String, Object> config, Version current) {
-    return install(config)
-  }
-
-  private def topicName() {
-  def type = INTEGRATION_TYPE
-    def url = INTEGRATION_URL
-    return context().sts().createTopologyTopicName(type, url)
+    return preInstall(config)
   }
 }
