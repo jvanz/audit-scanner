@@ -126,6 +126,23 @@ func NewScanner(
 	}, nil
 }
 
+// FIXME - This is workaround to allow start the SUSE Obs snapshot. This should be called before
+// any healtch check state is sent
+// This should be properly addressed when we changing the code to be production ready
+// This is not in the scanner level just to avoid dealing with the multiple goroutines sending health checks
+func (s *Scanner) BeforeScan(ctx context.Context) error {
+	return s.policyReportStore.BeforeScanning(ctx)
+}
+
+// FIXME - This is workaround to allow closing the SUSE Obs snapshot. This should be called after
+// all healtch check state is sent.
+// This should be properly addressed when we changing the code to be production ready
+// This is not in the scanner level just to avoid dealing with the multiple goroutines sending health checks
+func (s *Scanner) AfterScan(ctx context.Context) {
+	err := s.policyReportStore.AfterScanning(ctx)
+	log.Err(err)
+}
+
 // ScanNamespace scans resources for a given namespace.
 // Returns errors if there's any when fetching policies or resources, but only
 // logs them if there's a problem auditing the resource of saving the Report or

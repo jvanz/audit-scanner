@@ -15,6 +15,8 @@ import (
 )
 
 type ReportStore interface {
+	BeforeScanning(ctx context.Context) error
+	AfterScanning(ctx context.Context) error
 	CreateOrPatchPolicyReport(ctx context.Context, policyReport *wgpolicy.PolicyReport) error
 	DeleteOldPolicyReports(ctx context.Context, scanRunID, namespace string) error
 	CreateOrPatchClusterPolicyReport(ctx context.Context, clusterPolicyReport *wgpolicy.ClusterPolicyReport) error
@@ -32,6 +34,15 @@ func NewPolicyReportStore(client client.Client) *PolicyReportStore {
 	return &PolicyReportStore{
 		client: client,
 	}
+}
+
+func (s *PolicyReportStore) BeforeScanning(ctx context.Context) error {
+	return nil
+
+}
+
+func (s *PolicyReportStore) AfterScanning(ctx context.Context) error {
+	return nil
 }
 
 // CreateOrPatchPolicyReport creates or patches a PolicyReport.

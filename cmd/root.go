@@ -206,6 +206,8 @@ func startScanner(namespace string, clusterWide bool, scanner *scanner.Scanner) 
 
 	runUID := uuid.New().String()
 	ctx := context.Background()
+	scanner.BeforeScan(ctx)
+	defer scanner.AfterScan(ctx)
 	if clusterWide {
 		// only scan clusterwide
 		return scanner.ScanClusterWideResources(ctx, runUID)

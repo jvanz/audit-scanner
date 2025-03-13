@@ -8,11 +8,9 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
-	// "github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	corev1 "k8s.io/api/core/v1"
@@ -20,7 +18,7 @@ import (
 )
 
 // https://docs.stackstate.com/health/health-synchronization#consistency-models
-const DEFAULT_CONSISTENCY_MODEL = "REPEAT_STATES"
+const DEFAULT_CONSISTENCY_MODEL = "REPEAT_SNAPSHOTS"
 
 // SuseObsStore is a store for PolicyReport and ClusterPolicyReport.
 type SuseObsStore struct {
@@ -29,17 +27,18 @@ type SuseObsStore struct {
 	internalHostname string
 	urn              string
 	cluster          string
-	repeatInterval   string
-	expireInterval   string
+	repeatInterval   int
+	expireInterval   int
 }
 
 type SuseObsExpireConfiguration struct {
-	RepeatInterval string `json:"repeat_interval_s"`
-	ExpireInterval string `json:"expiry_interval_s"`
+	RepeatInterval int `json:"repeat_interval_s"`
+	ExpireInterval int `json:"expiry_interval_s,omitempty"`
 }
 
 type SuseObsStream struct {
-	Urn string `json:"urn"`
+	Urn         string `json:"urn"`
+	SubStreamId string `json:"sub_stream_id"`
 }
 
 type SuseObsCheckState struct {
@@ -51,10 +50,11 @@ type SuseObsCheckState struct {
 }
 
 type SuseObsHealthCheck struct {
-	ConsistencyModel string                     `json:"consistency_model"`
-	Expire           SuseObsExpireConfiguration `json:"expire"`
-	Stream           SuseObsStream              `json:"stream"`
-	CheckStates      []SuseObsCheckState        `json:"check_states"`
+	ConsistencyModel string                      `json:"consistency_model"`
+	StartSnapshot    *SuseObsExpireConfiguration `json:"start_snapshot,omitempty"`
+	StopSnapshot     *map[string]interface{}     `json:"stop_snapshot,omitempty"`
+	Stream           SuseObsStream               `json:"stream"`
+	CheckStates      []SuseObsCheckState         `json:"check_states"`
 }
 
 type SuseObsJsonPayload struct {
@@ -70,8 +70,8 @@ type SuseObsJsonPayload struct {
 
 // NewSuseObsStore creates a new SuseObsStore.
 func NewSuseObsStore(apiKey, internalHostname, urn, cluster string, repeatInterval, expireInterval time.Duration) *SuseObsStore {
-	repeatIntervalStr := strconv.FormatFloat(repeatInterval.Seconds(), 'f', 0, 32)
-	expireIntervalStr := strconv.FormatFloat(expireInterval.Seconds(), 'f', 0, 32)
+	repeatIntervalSeconds := int(repeatInterval.Seconds())
+	expireIntervalSeconds := int(expireInterval.Seconds())
 	return &SuseObsStore{
 		client: &http.Client{
 			Transport: &http.Transport{
@@ -83,8 +83,8 @@ func NewSuseObsStore(apiKey, internalHostname, urn, cluster string, repeatInterv
 		internalHostname: internalHostname,
 		urn:              urn,
 		cluster:          cluster,
-		repeatInterval:   repeatIntervalStr,
-		expireInterval:   expireIntervalStr,
+		repeatInterval:   repeatIntervalSeconds,
+		expireInterval:   expireIntervalSeconds,
 	}
 }
 
@@ -105,6 +105,47 @@ func (s *SuseObsStore) generateCheckStates(policyReport *wgpolicy.PolicyReport) 
 		checkStates = append(checkStates, checkState)
 	}
 	return checkStates
+}
+
+func (s *SuseObsStore) BeforeScanning(ctx context.Context) error {
+	payload, err := s.createStartSnapshotPayload()
+	if err != nil {
+		err = errors.Join(errors.New("failed to create the start snapshot payload for SUSE Obs"), err)
+	}
+	return s.sendRequest(payload)
+}
+
+func (s *SuseObsStore) AfterScanning(ctx context.Context) error {
+	payload, err := s.createStopSnapshotPayload()
+	if err != nil {
+		return err
+	}
+	err = s.sendRequest(payload)
+	if err != nil {
+		err = errors.Join(errors.New("failed to close SUSE Obs snapshot"), err)
+	}
+	return err
+}
+
+func (s *SuseObsStore) createStartSnapshotPayload() (*SuseObsJsonPayload, error) {
+	payload, err := s.generateSuseObsJsonPayload([]SuseObsCheckState{})
+	if err != nil {
+		return nil, err
+	}
+	payload.Health[0].StartSnapshot = &SuseObsExpireConfiguration{
+		RepeatInterval: s.repeatInterval,
+		ExpireInterval: s.expireInterval,
+	}
+	return payload, nil
+}
+
+func (s *SuseObsStore) createStopSnapshotPayload() (*SuseObsJsonPayload, error) {
+	payload, err := s.generateSuseObsJsonPayload([]SuseObsCheckState{})
+	if err != nil {
+		return nil, err
+	}
+	payload.Health[0].StopSnapshot = &map[string]interface{}{}
+	return payload, nil
 }
 
 func generateCheckStateId(policy string, scope *corev1.ObjectReference) string {
@@ -145,12 +186,9 @@ func (s *SuseObsStore) generateSuseObsJsonPayload(checkStates []SuseObsCheckStat
 		Topologies:          []interface{}{},
 		Health: []SuseObsHealthCheck{{
 			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
-			Expire: SuseObsExpireConfiguration{
-				RepeatInterval: s.repeatInterval,
-				ExpireInterval: s.expireInterval,
-			},
 			Stream: SuseObsStream{
-				Urn: s.urn,
+				Urn:         s.urn,
+				SubStreamId: s.cluster,
 			},
 			CheckStates: checkStates,
 		}},
@@ -195,9 +233,6 @@ func (s *SuseObsStore) DeleteOldClusterPolicyReports(ctx context.Context, scanRu
 }
 
 func (s *SuseObsStore) sendRequest(payload *SuseObsJsonPayload) error {
-	if len(payload.Health) > 0 && len(payload.Health[0].CheckStates) == 0 {
-		return nil
-	}
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return errors.New("failed to marshal SUSE OBS payload")

@@ -89,12 +89,9 @@ func TestSuseObsPayloadCreationFromPolicyReport(t *testing.T) {
 		Topologies:       []interface{}{},
 		Health: []SuseObsHealthCheck{{
 			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
-			Expire: SuseObsExpireConfiguration{
-				RepeatInterval: "1800",
-				ExpireInterval: "1800",
-			},
 			Stream: SuseObsStream{
-				Urn: "urn:health:kubernetes:external-health",
+				Urn:         "urn:health:kubernetes:external-health",
+				SubStreamId: "cluster",
 			},
 			CheckStates: []SuseObsCheckState{
 				{
@@ -187,12 +184,9 @@ func TestSuseObsPayloadCreationFromClusterPolicyReport(t *testing.T) {
 		Topologies:       []interface{}{},
 		Health: []SuseObsHealthCheck{{
 			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
-			Expire: SuseObsExpireConfiguration{
-				RepeatInterval: "1800",
-				ExpireInterval: "1800",
-			},
 			Stream: SuseObsStream{
-				Urn: "urn:health:kubernetes:external-health",
+				Urn:         "urn:health:kubernetes:external-health",
+				SubStreamId: "cluster",
 			},
 			CheckStates: []SuseObsCheckState{
 				{
@@ -295,4 +289,73 @@ func TestSuseObsCheckHealthCheckCreationFromPolicyReport(t *testing.T) {
 	require.NoError(t, err)
 
 	mockedRoundTripper.AssertExpectations(t)
+}
+
+func TestSuseObsStartSnapshotPayload(t *testing.T) {
+	repeatInterval, err := time.ParseDuration(DEFAULT_REPEAT_INTERVAL_DURATION)
+	require.NoError(t, err)
+	expireInterval, err := time.ParseDuration(DEFAULT_EXPIRE_INTERVAL_DURATION)
+	require.NoError(t, err)
+	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster", repeatInterval, expireInterval)
+	expectedPayload := SuseObsJsonPayload{
+		ApiKey:           "apiKey",
+		InternalHostname: "suseobs.localhost",
+		Events:           nil,
+		Metrics:          []interface{}{},
+		ServiceChecks:    []interface{}{},
+		Topologies:       []interface{}{},
+		Health: []SuseObsHealthCheck{{
+			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
+			StartSnapshot: &SuseObsExpireConfiguration{
+				RepeatInterval: 1800,
+				ExpireInterval: 1800,
+			},
+			StopSnapshot: nil,
+			Stream: SuseObsStream{
+				Urn:         "urn:health:kubernetes:external-health",
+				SubStreamId: "cluster",
+			},
+			CheckStates: []SuseObsCheckState{},
+		}},
+	}
+
+	payload, err := suseObsStore.createStartSnapshotPayload()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, time.Now().Unix(), payload.CollectionTimestamp)
+	expectedPayload.CollectionTimestamp = payload.CollectionTimestamp
+	require.Equal(t, expectedPayload, *payload)
+
+}
+
+func TestSuseObsStopSnapshotPayload(t *testing.T) {
+	repeatInterval, err := time.ParseDuration(DEFAULT_REPEAT_INTERVAL_DURATION)
+	require.NoError(t, err)
+	expireInterval, err := time.ParseDuration(DEFAULT_EXPIRE_INTERVAL_DURATION)
+	require.NoError(t, err)
+	suseObsStore := NewSuseObsStore("apiKey", "https://suseobs.localhost", "urn:health:kubernetes:external-health", "cluster", repeatInterval, expireInterval)
+	expectedPayload := SuseObsJsonPayload{
+		ApiKey:           "apiKey",
+		InternalHostname: "suseobs.localhost",
+		Events:           nil,
+		Metrics:          []interface{}{},
+		ServiceChecks:    []interface{}{},
+		Topologies:       []interface{}{},
+		Health: []SuseObsHealthCheck{{
+			ConsistencyModel: DEFAULT_CONSISTENCY_MODEL,
+			StartSnapshot:    nil,
+			StopSnapshot:     &map[string]interface{}{},
+			Stream: SuseObsStream{
+				Urn:         "urn:health:kubernetes:external-health",
+				SubStreamId: "cluster",
+			},
+			CheckStates: []SuseObsCheckState{},
+		}},
+	}
+
+	payload, err := suseObsStore.createStopSnapshotPayload()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, time.Now().Unix(), payload.CollectionTimestamp)
+	expectedPayload.CollectionTimestamp = payload.CollectionTimestamp
+	require.Equal(t, expectedPayload, *payload)
+
 }
