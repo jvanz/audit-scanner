@@ -1,0 +1,85 @@
+{
+  "nodes": [
+    {
+      "_type": "ExternalMonitor",
+      "id": -1,
+      "healthStreamUrn": "urn:health:kubewarden:audit_scanner",
+      "description": "Kubewarden policies checks",
+      "identifier": "urn:stackpack:kubewarden:shared:external-monitor:kubewarden",
+      "name": "Kubewarden",
+      "remediationHint": "The Kubewarden audit scanner reported issues. To resolve these issues, review the policy error messages displayed in the health check states",
+      "tags": [
+        "kubewarden"
+      ]
+    },
+    {
+      "_type": "MetricBinding",
+      "chartType": "line",
+      "enabled": true,
+      "tags": {},
+      "unit": "short",
+      "name": "Kubewarden Policies",
+      "priority": "MEDIUM",
+      "identifier": "urn:stackpack:kubewarden:shared:metric-binding:my-deployment-replica-counts",
+      "queries": [
+        {
+          "expression": "count(count by (name,policy_server,k8s_cluster_name) (kubewarden_policy_total{policy_status=\"active\", service_name=\"${name}\"}[${__interval}]))",
+          "alias": "Active policies"
+        },
+        {
+          "expression": "count(count by (name,policy_server,k8s_cluster_name) (kubewarden_policy_total{policy_status=\"pending\", service_name=\"${name}\"}[${__interval}]))",
+          "alias": "Pending policies"
+        },
+        {
+          "expression": "count(count by (name,policy_server,k8s_cluster_name) (kubewarden_policy_total{policy_status=\"scheduled\", service_name=\"${name}\"}[${__interval}]))",
+          "alias": "Scheduled policies"
+        }
+      ],
+      "scope": "name = \"kubewarden-controller\" and type = \"otel service\""
+    },
+    {
+      "_type": "MetricBinding",
+      "chartType": "line",
+      "enabled": true,
+      "tags": {},
+      "unit": "short",
+      "name": "Policies evaluation rate",
+      "priority": "MEDIUM",
+      "identifier": "urn:stackpack:kubewarden:shared:metric-binding:policy-evaluations",
+      "queries": [
+        {
+          "expression": "sum by (accepted) (rate(kubewarden_policy_evaluations_total{accepted=\"true\", service_name=\"${name}\"}[${__interval}]))",
+          "alias": "Accepted requests"
+        },
+        {
+          "expression": "sum by (accepted) (rate(kubewarden_policy_evaluations_total{accepted=\"false\", service_name=\"${name}\"}[${__interval}]))",
+          "alias": "Rejected requests"
+        },
+        {
+          "expression": "sum (rate(kubewarden_policy_evaluations_total{service_name=\"${name}\"}[${__interval}]))",
+          "alias": "All requests"
+        }
+      ],
+      "scope": "name = \"policy-server-default\" and type = \"otel service\""
+    },
+    {
+      "_type": "MetricBinding",
+      "chartType": "line",
+      "enabled": true,
+      "tags": {},
+      "unit": "short",
+      "name": "Policies evaluation latency",
+      "priority": "MEDIUM",
+      "identifier": "urn:stackpack:kubewarden:shared:metric-binding:policy-evaluations-latency",
+      "queries": [
+        {
+          "expression": "histogram_quantile(0.90, sum(rate(kubewarden_policy_evaluation_latency_milliseconds_bucket{service_name=\"${name}\"})) by (le))",
+          "alias": "0.90 percentile"
+        }
+      ],
+      "scope": "name = \"policy-server-default\" and type = \"otel service\""
+    }
+  ],
+  "timestamp": "2025-03-11T01:03:38Z",
+  "version": "0.6.0"
+}
