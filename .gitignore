@@ -24,4 +24,4 @@ testbin/*
 
 CRDS.tar.gz
 
-./kubewarden-stackpack/kubewarden-stackpack.sts
+kubewarden-stackpack/kubewarden-stackpack.sts
