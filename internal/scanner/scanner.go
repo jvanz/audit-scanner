@@ -35,7 +35,7 @@ const httpClientTimeout = 10 * time.Second
 type Scanner struct {
 	policiesClient    *policies.Client
 	k8sClient         *k8s.Client
-	policyReportStore *report.PolicyReportStore
+	policyReportStore report.ReportStore
 	// http client used to make requests against the Policy Server
 	httpClient               http.Client
 	outputScan               bool
@@ -124,6 +124,23 @@ func NewScanner(
 		parallelResourcesAudits:  config.Parallelization.ParallelResourcesAudits,
 		parallelPoliciesAudits:   config.Parallelization.PoliciesAudits,
 	}, nil
+}
+
+// FIXME - This is workaround to allow start the SUSE Obs snapshot. This should be called before
+// any healtch check state is sent
+// This should be properly addressed when we changing the code to be production ready
+// This is not in the scanner level just to avoid dealing with the multiple goroutines sending health checks
+func (s *Scanner) BeforeScan(ctx context.Context) error {
+	return s.policyReportStore.BeforeScanning(ctx)
+}
+
+// FIXME - This is workaround to allow closing the SUSE Obs snapshot. This should be called after
+// all healtch check state is sent.
+// This should be properly addressed when we changing the code to be production ready
+// This is not in the scanner level just to avoid dealing with the multiple goroutines sending health checks
+func (s *Scanner) AfterScan(ctx context.Context) {
+	err := s.policyReportStore.AfterScanning(ctx)
+	log.Err(err)
 }
 
 // ScanNamespace scans resources for a given namespace.

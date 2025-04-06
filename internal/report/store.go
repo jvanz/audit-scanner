@@ -14,6 +14,15 @@ import (
 	wgpolicy "sigs.k8s.io/wg-policy-prototypes/policy-report/pkg/api/wgpolicyk8s.io/v1alpha2"
 )
 
+type ReportStore interface {
+	BeforeScanning(ctx context.Context) error
+	AfterScanning(ctx context.Context) error
+	CreateOrPatchPolicyReport(ctx context.Context, policyReport *wgpolicy.PolicyReport) error
+	DeleteOldPolicyReports(ctx context.Context, scanRunID, namespace string) error
+	CreateOrPatchClusterPolicyReport(ctx context.Context, clusterPolicyReport *wgpolicy.ClusterPolicyReport) error
+	DeleteOldClusterPolicyReports(ctx context.Context, scanRunID string) error
+}
+
 // PolicyReportStore is a store for PolicyReport and ClusterPolicyReport.
 type PolicyReportStore struct {
 	// client is a controller-runtime client that knows about PolicyReport and ClusterPolicyReport CRDs
@@ -25,6 +34,15 @@ func NewPolicyReportStore(client client.Client) *PolicyReportStore {
 	return &PolicyReportStore{
 		client: client,
 	}
+}
+
+func (s *PolicyReportStore) BeforeScanning(ctx context.Context) error {
+	return nil
+
+}
+
+func (s *PolicyReportStore) AfterScanning(ctx context.Context) error {
+	return nil
 }
 
 // CreateOrPatchPolicyReport creates or patches a PolicyReport.
